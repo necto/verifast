@@ -1665,6 +1665,32 @@ let parse_header_file (path: string) (reportRange: range_kind -> loc -> unit) (r
   Stopwatch.stop parsing_stopwatch;
   result
 
+let parse_query query =
+  Stopwatch.start parsing_stopwatch;
+  let result =
+    let reportRangeDummy _ _ = () in
+    let reportShouldFailDummy _ = () in
+    let (loc, ignore_eol, token_stream) =
+      make_lexer (common_keywords @ c_keywords) ghost_keywords "query" query reportRangeDummy ~inGhostRange:true reportShouldFailDummy
+    in
+    let dataModel = {int_rank=4; long_rank=8; ptr_rank=8} in
+    let module MyParserArgs1 = struct
+      let language = CLang
+      let enforce_annotations = false
+      let data_model = dataModel
+    end in
+    let module MyParser1 = Parser(MyParserArgs1) in
+    try
+      let clause_stream = Stream.from (fun _ -> try let clause = Some (MyParser1.parse_spec_clause token_stream) in clause with Stream.Failure -> None) in
+    let pre_post = (parser [< 'RequiresClause pre; 'EnsuresClause post; >] -> Some (pre, post) | [< >] -> None) clause_stream in
+    pre_post
+    with
+      Stream.Error msg -> raise (ParseException (loc(), msg))
+    | Stream.Failure -> raise (ParseException (loc(), "Parse error"))
+  in
+  Stopwatch.stop parsing_stopwatch;
+  result
+
 let read_file_lines path =
   let channel = open_in path in
   let lines =

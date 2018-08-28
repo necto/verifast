@@ -9,6 +9,14 @@ open Parser
 open Verifast0
 open Ast
 
+type lemma_record = {
+  name : string;
+  type_params : string list;
+  params : (string * type_) list;
+  precond : expr;
+  postcond : expr;
+}
+
 module type VERIFY_PROGRAM_ARGS = sig
   val emitter_callback: package list -> unit
   type typenode
@@ -17,6 +25,7 @@ module type VERIFY_PROGRAM_ARGS = sig
   val ctxt: (typenode, symbol, termnode) Proverapi.context
   val options: options
   val program_path: string
+  val reportLemma: lemma_record -> unit
   val reportRange: range_kind -> loc -> unit
   val reportUseSite: decl_kind -> loc -> loc -> unit
   val reportExecutionForest: node list ref -> unit

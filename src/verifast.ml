@@ -2726,7 +2726,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   
   let rec verify_funcs (pn,ilist)  boxes gs lems ds =
     match ds with
-     [] -> (boxes, gs, lems)
+      [] -> (boxes, gs, lems)
     | Func (l, Lemma(auto, trigger), _, rt, g, ps, _, _, _, _, None, _, _)::ds -> 
       let g = full_name pn g in
       let ((g_file_name, _, _), _) = l in
@@ -2757,13 +2757,13 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | Func (l, k, _, _, g, _, _, functype_opt, _, _, Some _, _, _)::ds when k <> Fixpoint ->
       let g = full_name pn g in
       let gs', lems' =
-      record_fun_timing l g begin fun () ->
-      if !verbosity >= 1 then Printf.printf "%10.6fs: %s: Verifying function %s\n" (Perf.time()) (string_of_loc l) g;
-      let FuncInfo ([], fterm, l, k, tparams', rt, ps, nonghost_callers_only, pre, pre_tenv, post, terminates, _, Some (Some (ss, closeBraceLoc)),fb,v) = (List.assoc g funcmap)in
-      let tparams = [] in
-      let env = [] in
-      verify_func pn ilist gs lems boxes predinstmap funcmap tparams env l k tparams' rt g ps nonghost_callers_only pre pre_tenv post terminates ss closeBraceLoc
-      end in
+        record_fun_timing l g begin fun () ->
+          if !verbosity >= 1 then Printf.printf "%10.6fs: %s: Verifying function %s\n" (Perf.time()) (string_of_loc l) g;
+          let FuncInfo ([], fterm, l, k, tparams', rt, ps, nonghost_callers_only, pre, pre_tenv, post, terminates, _, Some (Some (ss, closeBraceLoc)),fb,v) = (List.assoc g funcmap)in
+          let tparams = [] in
+          let env = [] in
+          verify_func pn ilist gs lems boxes predinstmap funcmap tparams env l k tparams' rt g ps nonghost_callers_only pre pre_tenv post terminates ss closeBraceLoc
+        end in
       verify_funcs (pn, ilist) boxes gs' lems' ds
     | BoxClassDecl (l, bcn, _, _, _, _)::ds -> let bcn=full_name pn bcn in
       let (Some (l, boxpmap, boxinv, boxvarmap, amap, hpmap)) = try_assoc' Ghost (pn,ilist) bcn boxmap in
@@ -2775,81 +2775,81 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
              List.map
                (fun (PreservedByClause (l, an, xs, ss)) ->
                   begin
-                  match try_assoc an amap with
-                    None -> static_error l "No such action." None
-                  | Some (_, action_permission_info, apmap, pre, post) ->
-                    let () =
-                      let rec iter ys xs =
-                        match xs with
-                          [] -> ()
-                        | x::xs ->
-                          if List.mem_assoc x boxvarmap then static_error l "Action parameter name clashes with box variable." None;
-                          if List.mem_assoc x pmap then static_error l "Action parameter name clashes with handle predicate parameter." None;
-                          if List.mem x ys then static_error l "Duplicate action parameter." None;
-                          if startswith x "old_" then static_error l "Action parameter name cannot start with old_." None;
-                          iter (x::ys) xs
+                    match try_assoc an amap with
+                      None -> static_error l "No such action." None
+                    | Some (_, action_permission_info, apmap, pre, post) ->
+                      let () =
+                        let rec iter ys xs =
+                          match xs with
+                            [] -> ()
+                          | x::xs ->
+                            if List.mem_assoc x boxvarmap then static_error l "Action parameter name clashes with box variable." None;
+                            if List.mem_assoc x pmap then static_error l "Action parameter name clashes with handle predicate parameter." None;
+                            if List.mem x ys then static_error l "Duplicate action parameter." None;
+                            if startswith x "old_" then static_error l "Action parameter name cannot start with old_." None;
+                            iter (x::ys) xs
+                        in
+                        iter [] xs
                       in
-                      iter [] xs
-                    in
-                    let apbs =
-                      match zip xs apmap with
-                        None -> static_error l "Incorrect number of action parameters." None
-                      | Some bs -> bs
-                    in
-                    let apmap' = List.map (fun (x, (_, t)) -> (x, t)) apbs in
-                    let tenv = boxvarmap @ old_boxvarmap @ pmap @ apmap' in
-                    execute_branch begin fun () ->
-                    let boxId = get_unique_var_symb "this" BoxIdType in
-                    let currentThread = get_unique_var_symb "currentThread" intType in
-                    let actionHandles = get_unique_var_symb "actionHandles" (list_type HandleIdType) in
-                    let predicateHandle = get_unique_var_symb "predicateHandle" HandleIdType in
-                    assume (ctxt#mk_not (mk_mem HandleIdType predicateHandle actionHandles)) begin fun () ->
-                      let pre_boxargs = List.map (fun (x, t) -> (x, get_unique_var_symb ("old_" ^ x) t)) boxpmap in
-                      let pre_boxargsWithThis = ("this", boxId) :: pre_boxargs in
-                      with_context (Executing ([], [], l, "Checking preserved_by clause.")) $. fun () ->
-                        with_context PushSubcontext $. fun () ->
-                          produce_asn [] [] [] pre_boxargsWithThis boxinv real_unit None None $. fun h_pre _ pre_boxvars ->
-                            let aargs = List.map (fun (x, (y, t)) -> (x, y, get_unique_var_symb x t)) apbs in
-                            let apre_env = List.map (fun (x, y, t) -> (y, t)) aargs in
-                            assume (eval None ([("actionHandles", actionHandles)] @ pre_boxvars @ apre_env) pre) $. fun () ->
-                              let produce_action_permission h cont =
-                                match action_permission_info with
-                                  None -> cont h
-                                | Some(action_permission_pred_symb, action_permission_dispenser_pred_symb) -> 
-                                  let actionFrac = get_unique_var_symb "#actionFrac" RealType in
-                                  assume (ctxt#mk_real_lt real_zero actionFrac) $. fun () -> 
-                                    let (parameters, inputParamCount) = match action_permission_dispenser_pred_symb with
-                                      None -> ([boxId], Some 1)
-                                    | Some action_permission_dispenser_pred_symb -> 
-                                      let [(_, action_parameter)] = apre_env in 
-                                      ([boxId; action_parameter], Some 2)
-                                    in
-                                    produce_chunk h (action_permission_pred_symb, true) [] actionFrac inputParamCount parameters None cont
-                              in
-                              produce_action_permission h_pre $. fun h_pre ->
-                              let hpargs = List.map (fun (x, t) -> (x, get_unique_var_symb x t)) pmap in
-                              assume_handle_invs bcn hpmap hpn ([("predicateHandle", predicateHandle)] @ pre_boxvars @ hpargs) h_pre $. fun h_pre_hinv ->
-                                consume_asn rules [] h_pre_hinv [] pre_boxargsWithThis boxinv true real_unit $. fun _ hinv _ _ _ ->                         
-                                  let old_boxvars = List.map (fun (x, t) -> ("old_" ^ x, t)) pre_boxvars in
-                                  let post_boxargs = List.map (fun (x, t) -> (x, get_unique_var_symb x t)) boxpmap in
-                                  let post_boxargsWithThis = ("this", boxId) :: post_boxargs in
-                                  produce_asn [] hinv [] post_boxargsWithThis boxinv real_unit None None $. fun h_post_hinv _ post_boxvars ->
-                                    with_context PopSubcontext $. fun () ->
-                                    let ghostenv = List.map (fun (x, t) -> x) tenv in
-                                      assume (eval None ([("actionHandles", actionHandles)] @ post_boxvars @ old_boxvars @ apre_env) post) $. fun () ->
-                                        let aarg_env = List.map (fun (x, y, t) -> (x, t)) aargs in
-                                        let env = ["actionHandles", actionHandles; "predicateHandle", predicateHandle; "currentThread", currentThread] @
-                                          post_boxvars @ old_boxvars @ aarg_env @ hpargs in
-                                        let tenv = ["actionHandles", list_type HandleIdType; "predicateHandle", HandleIdType; "currentThread", intType] @ tenv in
-                                        verify_cont (pn,ilist) [] [] [] boxes true leminfo funcmap predinstmap [] tenv ghostenv h_post_hinv env ss begin fun _ _ _ h _ ->
-                                          let post_inv_env = [("predicateHandle", predicateHandle)] @ post_boxvars @ hpargs in
-                                          (* does not consume extended handles, only suffices if one can only extend pure handles *)
-                                          consume_asn rules [] h [] post_inv_env inv true real_unit (fun _ h _ _ _ -> success ())
-                                        end begin fun _ _ -> static_error l "Return statements are not allowed in handle predicate preservation proofs." None end
-                                        begin fun _ _ _ _ _ -> static_error l "Exceptions are not allowed in handle predicate preservation proofs." None end
-                    end
-                    end;
-                    an
+                      let apbs =
+                        match zip xs apmap with
+                          None -> static_error l "Incorrect number of action parameters." None
+                        | Some bs -> bs
+                      in
+                      let apmap' = List.map (fun (x, (_, t)) -> (x, t)) apbs in
+                      let tenv = boxvarmap @ old_boxvarmap @ pmap @ apmap' in
+                      execute_branch begin fun () ->
+                        let boxId = get_unique_var_symb "this" BoxIdType in
+                        let currentThread = get_unique_var_symb "currentThread" intType in
+                        let actionHandles = get_unique_var_symb "actionHandles" (list_type HandleIdType) in
+                        let predicateHandle = get_unique_var_symb "predicateHandle" HandleIdType in
+                        assume (ctxt#mk_not (mk_mem HandleIdType predicateHandle actionHandles)) begin fun () ->
+                          let pre_boxargs = List.map (fun (x, t) -> (x, get_unique_var_symb ("old_" ^ x) t)) boxpmap in
+                          let pre_boxargsWithThis = ("this", boxId) :: pre_boxargs in
+                          with_context (Executing ([], [], l, "Checking preserved_by clause.")) $. fun () ->
+                            with_context PushSubcontext $. fun () ->
+                              produce_asn [] [] [] pre_boxargsWithThis boxinv real_unit None None $. fun h_pre _ pre_boxvars ->
+                                let aargs = List.map (fun (x, (y, t)) -> (x, y, get_unique_var_symb x t)) apbs in
+                                let apre_env = List.map (fun (x, y, t) -> (y, t)) aargs in
+                                assume (eval None ([("actionHandles", actionHandles)] @ pre_boxvars @ apre_env) pre) $. fun () ->
+                                  let produce_action_permission h cont =
+                                    match action_permission_info with
+                                      None -> cont h
+                                    | Some(action_permission_pred_symb, action_permission_dispenser_pred_symb) -> 
+                                      let actionFrac = get_unique_var_symb "#actionFrac" RealType in
+                                      assume (ctxt#mk_real_lt real_zero actionFrac) $. fun () -> 
+                                        let (parameters, inputParamCount) = match action_permission_dispenser_pred_symb with
+                                            None -> ([boxId], Some 1)
+                                          | Some action_permission_dispenser_pred_symb -> 
+                                            let [(_, action_parameter)] = apre_env in 
+                                            ([boxId; action_parameter], Some 2)
+                                        in
+                                        produce_chunk h (action_permission_pred_symb, true) [] actionFrac inputParamCount parameters None cont
+                                  in
+                                  produce_action_permission h_pre $. fun h_pre ->
+                                    let hpargs = List.map (fun (x, t) -> (x, get_unique_var_symb x t)) pmap in
+                                    assume_handle_invs bcn hpmap hpn ([("predicateHandle", predicateHandle)] @ pre_boxvars @ hpargs) h_pre $. fun h_pre_hinv ->
+                                      consume_asn rules [] h_pre_hinv [] pre_boxargsWithThis boxinv true real_unit $. fun _ hinv _ _ _ ->                         
+                                        let old_boxvars = List.map (fun (x, t) -> ("old_" ^ x, t)) pre_boxvars in
+                                        let post_boxargs = List.map (fun (x, t) -> (x, get_unique_var_symb x t)) boxpmap in
+                                        let post_boxargsWithThis = ("this", boxId) :: post_boxargs in
+                                        produce_asn [] hinv [] post_boxargsWithThis boxinv real_unit None None $. fun h_post_hinv _ post_boxvars ->
+                                          with_context PopSubcontext $. fun () ->
+                                            let ghostenv = List.map (fun (x, t) -> x) tenv in
+                                            assume (eval None ([("actionHandles", actionHandles)] @ post_boxvars @ old_boxvars @ apre_env) post) $. fun () ->
+                                              let aarg_env = List.map (fun (x, y, t) -> (x, t)) aargs in
+                                              let env = ["actionHandles", actionHandles; "predicateHandle", predicateHandle; "currentThread", currentThread] @
+                                                        post_boxvars @ old_boxvars @ aarg_env @ hpargs in
+                                              let tenv = ["actionHandles", list_type HandleIdType; "predicateHandle", HandleIdType; "currentThread", intType] @ tenv in
+                                              verify_cont (pn,ilist) [] [] [] boxes true leminfo funcmap predinstmap [] tenv ghostenv h_post_hinv env ss begin fun _ _ _ h _ ->
+                                                let post_inv_env = [("predicateHandle", predicateHandle)] @ post_boxvars @ hpargs in
+                                                (* does not consume extended handles, only suffices if one can only extend pure handles *)
+                                                consume_asn rules [] h [] post_inv_env inv true real_unit (fun _ h _ _ _ -> success ())
+                                              end begin fun _ _ -> static_error l "Return statements are not allowed in handle predicate preservation proofs." None end
+                                                begin fun _ _ _ _ _ -> static_error l "Exceptions are not allowed in handle predicate preservation proofs." None end
+                        end
+                      end;
+                      an
                   end)
                pbcs
            in
@@ -2857,34 +2857,43 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         hpmap;
       verify_funcs (pn,ilist) (bcn::boxes) gs lems ds
     | _::ds -> verify_funcs (pn,ilist)  boxes gs lems ds
-  
+
   let lems1 =
     flatmap
       (function (g, FuncInfo (funenv, fterm, l, Lemma(_), tparams, rt, ps, nonghost_callers_only, pre, pre_tenv, post, terminates, functype_opt, body, fb, v)) -> [g] | _ -> [])
       funcmap1
-  
+
   let lems0 =
     flatmap
       (function (g, FuncInfo (funenv, fterm, l, Lemma(_), tparams, rt, ps, nonghost_callers_only, pre, pre_tenv, post, terminates, functype_opt, body, fb, v)) when not (List.mem g lems1) -> [g] | _ -> [])
       funcmap0
-  
+
   let gs1 =
     flatmap
       (function (g, FuncInfo (funenv, fterm, l, Regular, tparams, rt, ps, nonghost_callers_only, pre, pre_tenv, post, terminates, functype_opt, body, fb, v)) -> [g] | _ -> [])
       funcmap1
-  
+
   let gs0 =
     flatmap
       (function (g, FuncInfo (funenv, fterm, l, Regular, tparams, rt, ps, nonghost_callers_only, pre, pre_tenv, post, terminates, functype_opt, body, fb, v)) when not (List.mem g gs1) -> [g] | _ -> [])
       funcmap0
-  
+
   let rec verify_funcs' boxes gs lems ps=
     match ps with
       PackageDecl(l,pn,il,ds)::rest-> let (boxes, gs, lems) = verify_funcs (pn,il) boxes gs lems ds in verify_funcs' boxes gs lems rest
     | [] -> verify_classes boxes lems classmap
-  
+
   let () = verify_funcs' [] gs0 lems0 ps
-  
+
+  let () = funcmap1 |> List.iter (function
+        name, FuncInfo (environment, funptr, location, fkind,
+                        type_params, ret_type, params,
+                        nonghost_callers_only, precond,
+                        type_env_after_precond, postcond,
+                        terminates, fun_type, body,
+                        mbinding, visibility) ->
+        reportLemma {name;type_params;params;precond;postcond})
+
   let result = 
     (
       (
@@ -2899,9 +2908,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         abstract_types_map1
       )
     )
-  
+
   end (* CheckFile *)
-  
+
   let rec check_file filepath is_import_spec include_prelude dir headers ps =
     let module CF = CheckFile(struct
       let filepath = filepath
@@ -2921,55 +2930,55 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   let (prototypes_implemented, functypes_implemented, structures_defined, 
        nonabstract_predicates, modules_imported) =
     let result = check_should_fail ([], [], [], [], []) $. fun () ->
-    let (headers, ds)=
-      match file_type path with
-        | Java ->
-          let l = file_loc path in
-          let (headers, javas, provides) =
-            if Filename.check_suffix path ".jarsrc" then
-              let (jars, javas, provides) = parse_jarsrc_file_core path in
-              let specPath = Filename.chop_extension path ^ ".jarspec" in
-              let jarspecs = List.map (fun path -> (l, (DoubleQuoteInclude, path ^ "spec",""), [], [])) jars in (* Include the location where the jar is referenced *)
-              let pathDir = Filename.dirname path in
-              let javas = List.map (concat pathDir) javas in
-              if Sys.file_exists specPath then begin
-                let (specJars, _) = parse_jarspec_file_core specPath in
-                jardeps := specJars @ jars;
-                ((l, (DoubleQuoteInclude, Filename.basename specPath,""), [], []) :: jarspecs, javas, provides)
-              end else
-                (jarspecs, javas, provides)
+        let (headers, ds)=
+          match file_type path with
+          | Java ->
+            let l = file_loc path in
+            let (headers, javas, provides) =
+              if Filename.check_suffix path ".jarsrc" then
+                let (jars, javas, provides) = parse_jarsrc_file_core path in
+                let specPath = Filename.chop_extension path ^ ".jarspec" in
+                let jarspecs = List.map (fun path -> (l, (DoubleQuoteInclude, path ^ "spec",""), [], [])) jars in (* Include the location where the jar is referenced *)
+                let pathDir = Filename.dirname path in
+                let javas = List.map (concat pathDir) javas in
+                if Sys.file_exists specPath then begin
+                  let (specJars, _) = parse_jarspec_file_core specPath in
+                  jardeps := specJars @ jars;
+                  ((l, (DoubleQuoteInclude, Filename.basename specPath,""), [], []) :: jarspecs, javas, provides)
+                end else
+                  (jarspecs, javas, provides)
+              else
+                ([], [path], [])
+            in
+            let provides = provides @ options.option_provides in
+            let token = (* A string to make the provide files unique *)
+              if options.option_keep_provide_files then "" else Printf.sprintf "_%ld" (Stopwatch.getpid ())
+            in
+            let provide_javas =
+              provides |> imap begin fun i provide ->
+                let provide_file = Printf.sprintf "%s_provide%d%s.java" (Filename.chop_extension path) i token in
+                let cmdLine = Printf.sprintf "%s > %s" provide provide_file in
+                let exitCode = Sys.command cmdLine in
+                if exitCode <> 0 then
+                  raise (static_error l (Printf.sprintf "Provide %d: command '%s' failed with exit code %d" i cmdLine exitCode) None);
+                provide_file
+              end
+            in
+            provide_files := provide_javas;
+            let javas = javas @ provide_javas in
+            let context = List.map (fun (((b, _, _), _), (_, p, _), _, _) -> Util.concat (Filename.dirname b) ((Filename.chop_extension p) ^ ".jar")) headers in
+            let ds = Java_frontend_bridge.parse_java_files javas context reportRange reportShouldFail options.option_verbose options.option_enforce_annotations options.option_use_java_frontend in
+            (headers, ds)
+          | CLang ->
+            if Filename.check_suffix path ".h" then
+              parse_header_file path reportRange reportShouldFail options.option_verbose [] options.option_define_macros options.option_enforce_annotations data_model
             else
-              ([], [path], [])
-          in
-          let provides = provides @ options.option_provides in
-          let token = (* A string to make the provide files unique *)
-            if options.option_keep_provide_files then "" else Printf.sprintf "_%ld" (Stopwatch.getpid ())
-          in
-          let provide_javas =
-            provides |> imap begin fun i provide ->
-              let provide_file = Printf.sprintf "%s_provide%d%s.java" (Filename.chop_extension path) i token in
-              let cmdLine = Printf.sprintf "%s > %s" provide provide_file in
-              let exitCode = Sys.command cmdLine in
-              if exitCode <> 0 then
-                raise (static_error l (Printf.sprintf "Provide %d: command '%s' failed with exit code %d" i cmdLine exitCode) None);
-              provide_file
-            end
-          in
-          provide_files := provide_javas;
-          let javas = javas @ provide_javas in
-          let context = List.map (fun (((b, _, _), _), (_, p, _), _, _) -> Util.concat (Filename.dirname b) ((Filename.chop_extension p) ^ ".jar")) headers in
-          let ds = Java_frontend_bridge.parse_java_files javas context reportRange reportShouldFail options.option_verbose options.option_enforce_annotations options.option_use_java_frontend in
-          (headers, ds)
-        | CLang ->
-          if Filename.check_suffix path ".h" then
-            parse_header_file path reportRange reportShouldFail options.option_verbose [] options.option_define_macros options.option_enforce_annotations data_model
-          else
-            parse_c_file path reportRange reportShouldFail options.option_verbose options.option_include_paths options.option_define_macros options.option_enforce_annotations data_model
-    in
-    emitter_callback ds;
-    check_should_fail ([], [], [], [], []) $. fun () ->
-    let (linker_info, _) = check_file path false true programDir headers ds in
-    linker_info
+              parse_c_file path reportRange reportShouldFail options.option_verbose options.option_include_paths options.option_define_macros options.option_enforce_annotations data_model
+        in
+        emitter_callback ds;
+        check_should_fail ([], [], [], [], []) $. fun () ->
+          let (linker_info, _) = check_file path false true programDir headers ds in
+          linker_info
     in
     begin
       match !shouldFailLocs with
@@ -2977,12 +2986,12 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       | l::_ -> static_error l "No error found on line." None
     end;
     result
-  
+
   let () =
     if not options.option_keep_provide_files then begin
       !provide_files |> List.iter Sys.remove
     end
-  
+
   let () = !stats#appendProverStats ctxt#stats
 
   let create_jardeps_file() =
@@ -3100,14 +3109,14 @@ There are 7 kinds of entries possible in a vfmanifest/dll_vfmanifest file
       ) (fun () -> close_out file)
     else
       manifest_map := (manifest_filename, lines)::!manifest_map
-  
+
   let () =
     if file_type path <> Java then
       create_manifest_file()
     else
       if Filename.check_suffix path ".jarsrc" then
         create_jardeps_file()
-  
+
 end
 
 (** Verifies the .c/.jarsrc/.scala file at path [path].
@@ -3122,6 +3131,7 @@ let verify_program_core (* ?verify_program_core *)
     (ctxt: (typenode', symbol', termnode') Proverapi.context)
     (options : options)
     (program_path : string)
+    (reportLemma : lemma_record -> unit)
     (reportRange : range_kind -> loc -> unit)
     (reportUseSite : decl_kind -> loc -> loc -> unit)
     (reportExecutionForest : node list ref -> unit)
@@ -3137,6 +3147,7 @@ let verify_program_core (* ?verify_program_core *)
     let ctxt = ctxt
     let options = options
     let program_path = program_path
+    let reportLemma = reportLemma
     let reportRange = reportRange
     let reportUseSite = reportUseSite
     let reportExecutionForest = reportExecutionForest
@@ -3202,6 +3213,7 @@ let verify_program (* ?verify_program *)
     (prover : string)
     (options : options)
     (path : string)
+    (reportLemma : lemma_record -> unit)
     (reportRange : range_kind -> loc -> unit)
     (reportUseSite : decl_kind -> loc -> loc -> unit)
     (reportExecutionForest : node list ref -> unit)
@@ -3218,7 +3230,7 @@ let verify_program (* ?verify_program *)
              | None -> None
            in
            verify_program_core ~emitter_callback:emitter_callback ctxt options
-             path reportRange reportUseSite reportExecutionForest breakpoint exportpoint targetPath;
+             path reportLemma reportRange reportUseSite reportExecutionForest breakpoint exportpoint targetPath;
            !stats
      end)
 
