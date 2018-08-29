@@ -32,116 +32,6 @@ let dump_context_to_file file ctxts termnode_to_string =
   flush outfile;
   close_out outfile
 
-(*
-   free_vars contains the variable names that can be assigned in the e1 expression.
-   assignments are the assignments the the variables imposed by the caller.
-   assignments lhs must always be a subset of free_vars.
-   assignments is add-only.
-*)
-let rec reducible_exprs verbose free_vars assignments e1 e2 =
-  let pats_literal pats =
-    List.for_all (function LitPat _ -> true | _ -> false ) pats
-  in
-  let get_lit_pat_exprs pats =
-    pats |> List.map (function LitPat e -> e | _ -> failwith "non literal pattern")
-  in
-  let handle_pure_fun_call name1 name2 args1 args2 =
-    if (not (String.equal name1 name2) ||
-        List.length args1 != List.length args2) then
-      None
-    else
-      List.fold_left2 (fun acc expr1 expr2 ->
-          match acc with
-          | Some assignments ->
-            reducible_exprs verbose free_vars assignments expr1 expr2
-          | None -> None)
-        (Some assignments) args1 args2
-  in
-  let handle_call_with_pats name1 name2 pats1 pats2 =
-    if (pats_literal pats1) && (pats_literal pats2) then
-      handle_pure_fun_call
-        name1 name2
-        (get_lit_pat_exprs pats1)
-        (get_lit_pat_exprs pats2)
-    else None
-  in
-  match e1, e2 with
-  | True _, True _ -> Some assignments
-  | False _, False _ -> Some assignments
-  | Null _, Null _ -> Some assignments
-  | ExprAsn (_, e1), _ -> reducible_exprs verbose free_vars assignments e1 e2
-  | _, ExprAsn (_, e2) -> reducible_exprs verbose free_vars assignments e1 e2
-  | Var (_, name1), Var (loc, name2)
-  | Var (_, name1), WVar (loc, name2, _)
-  | WVar (_, name1, _), Var (loc, name2)
-  | WVar (_, name1, _), WVar (loc, name2, _) ->
-    if (List.mem name1 free_vars) then begin
-      match List.assoc_opt name1 assignments with
-      | None -> Some ((name1, Var (loc, name2))::assignments)
-      | Some Var (_, x)
-      | Some WVar (_, x, _) -> if String.equal x name2 then Some assignments else None
-      | Some _ -> None
-    end else if String.equal name1 name2 then Some assignments else None
-  | WVar (loc, name1, _), _
-  | Var (loc, name1), _ ->
-    if (List.mem name1 free_vars) then begin
-      match List.assoc_opt name1 assignments with
-      | None -> Some ((name1, e2)::assignments)
-      | Some _ -> None
-    end else None (* TODO: allow the case when the assignment is the same value (ignoring loc) *)
-  | Operation (_, op1, exprs1), Operation (_, op2, exprs2)
-  | Operation (_, op1, exprs1), WOperation (_, op2, exprs2, _)
-  | WOperation (_, op1, exprs1, _), Operation (_, op2, exprs2)
-  | WOperation (_, op1, exprs1, _), WOperation (_, op2, exprs2, _) ->
-    if (op1 != op2 || List.length exprs1 != List.length exprs2) then None
-    else
-      List.fold_left2 (fun acc expr1 expr2 ->
-          match acc with
-          | Some assignments ->
-            reducible_exprs verbose free_vars assignments expr1 expr2
-          | None -> None)
-        (Some assignments) exprs1 exprs2
-  | WPureFunCall (_, name1, _, args1),
-    CallExpr (_, name2, _, _, args2, _) ->
-    if pats_literal args2 then
-      handle_pure_fun_call name1 name2 args1 (get_lit_pat_exprs args2)
-    else None
-  | CallExpr (_, name1, _, _, args1, _),
-    WPureFunCall (_, name2, _, args2) ->
-    if pats_literal args1 then
-      handle_pure_fun_call name1 name2 (get_lit_pat_exprs args1) args2
-    else None
-  | WPureFunCall (_, name1, _, args1),
-    WPureFunCall (_, name2, _, args2) ->
-    handle_pure_fun_call name1 name2 args1 args2
-  | PredAsn (_, predref1, _, _, pat_list1),
-    PredAsn (_, predref2, _, _, pat_list2)
-  | PredAsn (_, predref1, _, _, pat_list1),
-    WPredAsn (_, predref2, _, _, _, pat_list2)
-  | WPredAsn (_, predref1, _, _, _, pat_list1),
-    PredAsn (_, predref2, _, _, pat_list2)
-  | WPredAsn (_, predref1, _, _, _, pat_list1),
-    WPredAsn (_, predref2, _, _, _, pat_list2) ->
-    handle_call_with_pats predref1#name predref2#name pat_list1 pat_list2
-  | CallExpr (_, name1, _, _, pat_list1, _),
-    WPredAsn (_, predref2, _, _, _, pat_list2) ->
-    handle_call_with_pats name1 predref2#name pat_list1 pat_list2
-  | WPredAsn (_, predref1, _, _, _, pat_list1),
-    CallExpr (_, name2, _, _, pat_list2, _) ->
-    handle_call_with_pats predref1#name name2 pat_list1 pat_list2
-  | CallExpr (_, name1, _, _, pat_list1, _),
-    PredAsn (_, predref2, _, _, pat_list2) ->
-    handle_call_with_pats name1 predref2#name pat_list1 pat_list2
-  | PredAsn (_, predref1, _, _, pat_list1),
-    CallExpr (_, name2, _, _, pat_list2, _) ->
-    handle_call_with_pats predref1#name name2 pat_list1 pat_list2
-  | _, _ ->
-    if verbose then
-      Printf.printf "mismatch %s ~~~ %s\n"
-        (string_of_expr ~verbose:true e1)
-        (string_of_expr ~verbose:true e2);
-    None
-
 let _ =
   let print_msg l msg =
     print_endline (string_of_loc l ^ ": " ^ msg)
@@ -192,7 +82,7 @@ let _ =
             printf "%d lemmas registered\n" (List.length !lemmas);
             printf "Deparsed query: %s\n" (string_of_expr qq);
             !lemmas |> List.iter (function {Verifast1.name=name;Verifast1.type_params;Verifast1.params;Verifast1.precond;Verifast1.postcond} ->
-              match reducible_exprs false (List.map fst params) [] postcond qq with
+              match Verifast0.reducible_exprs false (List.map fst params) [] postcond qq with
               | Some assignments -> printf "MATCH: ";
                 assignments |> List.iter (fun (lhs,rhs) ->
                     printf "%s = %s; " lhs (string_of_expr rhs););
