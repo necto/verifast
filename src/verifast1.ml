@@ -17,6 +17,9 @@ type lemma_record = {
   postcond : expr;
 }
 
+let no_retry_cont _ _ =
+  failwith "no retry"
+
 module type VERIFY_PROGRAM_ARGS = sig
   val emitter_callback: package list -> unit
   type typenode
@@ -5035,14 +5038,66 @@ let check_if_list_is_defined () =
     !stats#proverOtherQuery;
     (ctxt#query t)
   
-  let assert_term t h env l msg url = 
+  let assert_term lemmas_in_scope retry_cont depth expr t h env l msg url = 
+    printf "asserting expr %s\n" (string_of_expr expr);
+    printf "%d lemmas available\n" (List.length lemmas_in_scope);
     !stats#proverOtherQuery;
     if not (ctxt#query t) then
       begin
-        if tolerate_errors then
-          printf "Tolerated symbolic execution error: %s  %s\n" msg (ctxt#pprint t)
-        else
-          assert_false h env l msg url
+        printf "Assertion will not pass, resque mode.\n";
+        (* Skip the head - which is the current function*)
+        let matched_lemma =
+          (List.tl lemmas_in_scope) |> List.fold_left
+            (fun matched_lemma (name, finfo) ->
+               match matched_lemma with
+               | None -> begin
+                   match finfo with
+                     FuncInfo (envir, fptr, loc, func_kind, tparams, ret_type, params, nonghost_callers_only, precond, tenv_after_precond, postcond, terminates, ftype, body, mbind, visib) ->
+                     printf "considering %s\n" name;
+                     match reducible_exprs true (List.map fst params) [] postcond expr with
+                     | None ->
+                       printf "NO match\n";
+                       None
+                     | Some assignments -> printf "MATCH: ";
+                       assignments |> List.iter (fun (lhs,rhs) ->
+                           printf "%s = %s; " lhs (string_of_expr rhs););
+                       printf "\n";
+                       printf "%s<%s>(" name (String.concat "," tparams);
+                       params |> List.iter (fun (name, type_) ->
+                           printf "%s %s, " (string_of_type type_) name;);
+                       printf ")\nrequires %s\n" (string_of_expr precond);
+                       printf "ensures %s\n\n" (string_of_expr postcond);
+                       printf "Insert at %s %s\n\n" (string_of_srcpos (fst l))
+                         (name ^ "(" ^ (String.concat ", " (List.map (fun (arg, _) ->
+                              match List.assoc_opt arg assignments with
+                              | Some v -> string_of_expr v
+                              | None -> arg
+                            ) params)) ^ ");");
+                       Some (name,finfo,assignments)
+                 end
+               | Some _ -> matched_lemma) None
+        in
+        let lemma_sttmt =
+          match matched_lemma with
+          | None -> None
+          | Some (name, FuncInfo (envir, fptr, loc, func_kind, tparams, ret_type, params, nonghost_callers_only, precond, tenv_after_precond, postcond, terminates, ftype, body, mbind, visib), assignments) ->
+            let args = List.map (fun (arg, _) ->
+                match List.assoc_opt arg assignments with
+                | Some v -> v
+                | None -> Var (l, arg)
+              ) params
+            in
+            Some (ExprStmt (CallExpr (l, name, [], [], (List.map (fun arg -> LitPat arg) args), Static)))
+        in
+        match lemma_sttmt with
+        | Some lemma_sttmt ->
+          (*FIXME: where should the result really go?*)
+          ignore (retry_cont lemma_sttmt (depth + 1))
+        | None ->
+          if tolerate_errors then
+            printf "Tolerated symbolic execution error: %s  %s\n" msg (ctxt#pprint t)
+          else
+            assert_false h env l msg url
       end
 
   let rec prover_type_term l tp = 

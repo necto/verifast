@@ -46,12 +46,12 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | ForallAsn _ -> true
     | _ -> false
   
-  let rec assert_expr env e h env l msg url = 
+  let rec assert_expr lemmas_in_scope retry_cont depth env e h env l msg url = 
     let t = eval None env e in
     if query_term t then
       ()
     else begin
-      ignore (assert_expr_split e h env l msg url); ()
+      ignore (assert_expr_split lemmas_in_scope retry_cont depth e h env l msg url); ()
     end
   
   and branch cont1 cont2 =
@@ -73,17 +73,17 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     currentForest := oldForest;
     SymExecSuccess
   
-  and assert_expr_split e h env l msg url = 
+  and assert_expr_split (lemmas_in_scope: (string * func_info) list) retry_cont depth e h env l msg url = 
     match e with
       IfExpr(l0, con, e1, e2) -> 
         branch
-           (fun () -> assume (eval None env con) (fun () -> assert_expr_split e1 h env l msg url))
-           (fun () -> assume (ctxt#mk_not (eval None env con)) (fun () -> assert_expr_split e2 h env l msg url))
+           (fun () -> assume (eval None env con) (fun () -> assert_expr_split lemmas_in_scope retry_cont depth e1 h env l msg url))
+           (fun () -> assume (ctxt#mk_not (eval None env con)) (fun () -> assert_expr_split lemmas_in_scope retry_cont depth e2 h env l msg url))
     | WOperation(l0, And, [e1; e2], t) ->
       branch
-        (fun () -> assert_expr_split e1 h env l msg url)
-        (fun () -> assert_expr_split e2 h env l msg url)
-    | _ -> with_context (Executing (h, env, expr_loc e, "Consuming expression")) (fun () -> assert_term (eval None env e) h env l msg url; SymExecSuccess)
+        (fun () -> assert_expr_split lemmas_in_scope retry_cont depth e1 h env l msg url)
+        (fun () -> assert_expr_split lemmas_in_scope retry_cont depth e2 h env l msg url)
+    | _ -> with_context (Executing (h, env, expr_loc e, "Consuming expression")) (fun () -> assert_term lemmas_in_scope retry_cont depth e (eval None env e) h env l msg url; SymExecSuccess)
   
   let rec evalpat ghost ghostenv env pat tp0 tp cont =
     match pat with
@@ -843,7 +843,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   let srcpat pat = SrcPat pat
   let srcpats pats = List.map srcpat pats
   
-  let rec consume_asn_core_with_post rules tpenv h ghostenv env env' p checkDummyFracs coef cont_with_post =
+  let rec consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p checkDummyFracs coef cont_with_post =
     let cont chunks h ghostenv env env' size_first = cont_with_post chunks h ghostenv env env' size_first None in
     let with_context_helper cont =
       match p with
@@ -953,19 +953,19 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       inst_call_pred l real_unit_pat e_opt tn g index pats
     | ExprAsn (l, WOperation (lo, Eq, [WVar (lx, x, LocalVar); e], t)) ->
       begin match try_assoc x env with
-        Some t -> assert_term (ctxt#mk_eq t (ev e)) h env l "Cannot prove condition." None; cont [] h ghostenv env env' None
+        Some t -> assert_term lemmas_in_scope retry_cont depth p (ctxt#mk_eq t (ev e)) h env l "Cannot prove condition." None; cont [] h ghostenv env env' None
       | None -> let binding = (x, ev e) in cont [] h ghostenv (binding::env) (binding::env') None
       end
     | ExprAsn (l, e) ->
-      assert_expr env e h env l "Cannot prove condition." None; cont [] h ghostenv env env' None
+      assert_expr lemmas_in_scope retry_cont depth env e h env l "Cannot prove condition." None; cont [] h ghostenv env env' None
     | WMatchAsn (l, e, pat, tp) ->
       let v = ev e in
       let Some (ghostenv, env, env') = match_pat h l ghostenv env env' false (SrcPat pat) tp tp v (fun ghostenv env env' -> Some (ghostenv, env, env')) in
       cont [] h ghostenv env env' None
     | Sep (l, p1, p2) ->
-      consume_asn_core_with_post rules tpenv h ghostenv env env' p1 checkDummyFracs coef (fun chunks h ghostenv env env' size post ->
+      consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p1 checkDummyFracs coef (fun chunks h ghostenv env env' size post ->
         if post <> None then static_error l "Left-hand operand of separating conjunction cannot specify a postcondition." None;
-        consume_asn_core_with_post rules tpenv h ghostenv env env' p2 checkDummyFracs coef (fun chunks' h ghostenv env env' _ post ->
+        consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p2 checkDummyFracs coef (fun chunks' h ghostenv env env' _ post ->
           cont_with_post (chunks @ chunks') h ghostenv env env' size post
         )
       )
@@ -980,10 +980,10 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       branch
         (fun _ ->
            assume (ev e) (fun _ ->
-             consume_asn_core_with_post rules tpenv h ghostenv env env' p1 checkDummyFracs coef cont_with_post))
+             consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p1 checkDummyFracs coef cont_with_post))
         (fun _ ->
            assume (ctxt#mk_not (ev e)) (fun _ ->
-             consume_asn_core_with_post rules tpenv h ghostenv env env' p2 checkDummyFracs coef cont_with_post))
+             consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p2 checkDummyFracs coef cont_with_post))
     | WSwitchAsn (l, e, i, cs) ->
       let cont_with_post chunks h ghostenv1 env1 env'' _ post =
         let ghostenv, env =
@@ -1023,7 +1023,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               (xs, xenv)
           in
           branch
-            (fun _ -> assume_eq t (mk_app ctorsym xs) (fun _ -> consume_asn_core_with_post rules tpenv h (pats @ ghostenv) (xenv @ env) env' p checkDummyFracs coef cont_with_post))
+            (fun _ -> assume_eq t (mk_app ctorsym xs) (fun _ -> consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h (pats @ ghostenv) (xenv @ env) env' p checkDummyFracs coef cont_with_post))
             (fun _ -> iter cs)
         | [] -> success()
       in
@@ -1031,7 +1031,7 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     | EmpAsn l -> cont [] h ghostenv env env' None
     | ForallAsn (l, ManifestTypeExpr(_, tp), i, e) -> 
       let fresh_term = get_unique_var_symb i tp in
-      assert_expr ((i, fresh_term) :: env) e h ((i, fresh_term) :: env) l "Cannot prove condition." None;
+      assert_expr lemmas_in_scope retry_cont depth ((i, fresh_term) :: env) e h ((i, fresh_term) :: env) l "Cannot prove condition." None;
       cont [] h ghostenv env env' None
     | CoefAsn (l, coefpat, WPointsTo (_, e, tp, rhs)) -> points_to l (SrcPat coefpat) e tp (SrcPat rhs)
     | CoefAsn (l, coefpat, WPredAsn (_, g, is_global_predref, targs, pat0, pats)) -> pred_asn l (SrcPat coefpat) g is_global_predref targs (srcpats pat0) (srcpats pats)
@@ -1040,16 +1040,16 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       cont_with_post [] h ghostenv env env' None (Some body)
     )
   
-  let rec consume_asn_core rules tpenv h ghostenv env env' p checkDummyFracs coef cont =
-    consume_asn_core_with_post rules tpenv h ghostenv env env' p checkDummyFracs coef $. fun chunks h ghostenv env env' size_first post ->
+  let rec consume_asn_core lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p checkDummyFracs coef cont =
+    consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env env' p checkDummyFracs coef $. fun chunks h ghostenv env env' size_first post ->
     cont chunks h ghostenv env env' size_first
   
-  let consume_asn rules tpenv h ghostenv env p checkDummyFracs coef cont =
-    consume_asn_core_with_post rules tpenv h ghostenv env [] p checkDummyFracs coef $. fun chunks h ghostenv env env' size_first post ->
+  let consume_asn lemmas_in_scope retry_cont depth rules tpenv h ghostenv env p checkDummyFracs coef cont =
+    consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env [] p checkDummyFracs coef $. fun chunks h ghostenv env env' size_first post ->
     cont chunks h ghostenv env size_first
 
-  let rec consume_asn_with_post rules tpenv h ghostenv env p checkDummyFracs coef cont =
-    consume_asn_core_with_post rules tpenv h ghostenv env [] p checkDummyFracs coef $. fun chunks h ghostenv env env' size_first post ->
+  let rec consume_asn_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env p checkDummyFracs coef cont =
+    consume_asn_core_with_post lemmas_in_scope retry_cont depth rules tpenv h ghostenv env [] p checkDummyFracs coef $. fun chunks h ghostenv env env' size_first post ->
     cont chunks h ghostenv env size_first post
   
   let term_of_pred_index =
@@ -1436,8 +1436,9 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                               else
                                 coef 
                           | Some _ -> coef (* todo *)
-                        in
-                        consume_asn rules tpenv h ghostenv env outer_wbody checkDummyFracs new_coef $. fun _ h ghostenv env2 size_first ->
+                        in 
+                        (* No retry here, the funciton must succeed *)
+                        consume_asn [] no_retry_cont 0 rules tpenv h ghostenv env outer_wbody checkDummyFracs new_coef $. fun _ h ghostenv env2 size_first ->
                           let outputParams = drop (List.length outer_formal_input_args) outer_formal_args in
                           let outputArgs = List.map (fun (x, tp0) -> let tp = instantiate_type tpenv tp0 in (prover_convert_term (List.assoc x env2) tp0 tp)) outputParams in
                           with_context (Executing (h, [], outer_l, "Producing auto-closed chunk")) $. fun () ->
@@ -1650,12 +1651,13 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             let checkDummyFracs = true in
             let coef = match coefpat with TermPat f -> (real_mul dummy_loc coef f) | SrcPat (DummyPat) -> get_dummy_frac_term () | SrcPat (LitPat _) -> assert false; | SrcPat (VarPat(_, x)) -> real_unit  in
             with_context PushSubcontext $. fun () ->
-            with_context (Executing (h, env, l, "Auto-closing predicate")) $. fun () ->
-            consume_asn rules tpenv h ghostenv env wbody checkDummyFracs coef $. fun _ h ghostenv env size_first ->
-            let outputArgs = List.map (fun (x, tp0) -> let tp = instantiate_type tpenv tp0 in (prover_convert_term (List.assoc x env) tp0 tp)) outputParams in
-            with_context (Executing (h, [], l, "Producing auto-closed chunk")) $. fun () ->
-            with_context PopSubcontext $. fun () ->
-            cont (Chunk (g, targs, coef, inputArgs @ outputArgs, None)::h)
+              with_context (Executing (h, env, l, "Auto-closing predicate")) $. fun () ->
+                (* Must never fail, as it is just closing a predicate*)
+                consume_asn [] no_retry_cont 0 rules tpenv h ghostenv env wbody checkDummyFracs coef $. fun _ h ghostenv env size_first ->
+                  let outputArgs = List.map (fun (x, tp0) -> let tp = instantiate_type tpenv tp0 in (prover_convert_term (List.assoc x env) tp0 tp)) outputParams in
+                  with_context (Executing (h, [], l, "Producing auto-closed chunk")) $. fun () ->
+                    with_context PopSubcontext $. fun () ->
+                      cont (Chunk (g, targs, coef, inputArgs @ outputArgs, None)::h)
           in
           let rule l h targs terms_are_well_typed coef coefpat ts cont =
             (*let _ = print_endline "trying to close empty predicate" in*)
@@ -1864,11 +1866,12 @@ module Assertions(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                   let rules = rules_cell in
                   with_context PushSubcontext $. fun () ->
                   with_context (Executing (h, env, asn_loc wbody, "Auto-closing array slice")) $. fun () ->
-                  consume_asn rules tpenv h ghostenv env wbody true coef' $. fun _ h ghostenv env size_first ->
-                  with_context PopSubcontext $. fun () ->
-                  match try_assoc xvalue env with
-                    None -> cont None
-                  | Some v -> cont'' v h
+                    (*must never fail, as it is just closing an array slice*)
+                    consume_asn [] no_retry_cont 0 rules tpenv h ghostenv env wbody true coef' $. fun _ h ghostenv env size_first ->
+                      with_context PopSubcontext $. fun () ->
+                        match try_assoc xvalue env with
+                          None -> cont None
+                        | Some v -> cont'' v h
             end $. fun v h ->
             cont' ((coef', index, ctxt#mk_add index (ctxt#mk_intlit 1), mk_list elem_tp [elem], mk_list v_tp [v]), h)
           in
