@@ -177,7 +177,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     check_exportpoint l;
     major_success ()
   
-  let check_func_header_compat lemmas_in_scope retry_cont depth l msg0 msg env00 (k, tparams, rt, xmap, nonghost_callers_only, pre, post, epost, terminates) (k0, tparams0, rt0, xmap0, nonghost_callers_only0, tpenv0, cenv0, pre0, post0, epost0, terminates0) =
+  let check_func_header_compat lemmas_in_scope (arg_pats,arg_names) retry_cont depth l msg0 msg env00 (k, tparams, rt, xmap, nonghost_callers_only, pre, post, epost, terminates) (k0, tparams0, rt0, xmap0, nonghost_callers_only0, tpenv0, cenv0, pre0, post0, epost0, terminates0) =
     let msg1 = msg in
     let msg = msg ^ ": " in
     if k <> k0 then 
@@ -217,7 +217,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         assert_false h env l "Contract required" None
       | _ -> ()
       end;
-      consume_asn lemmas_in_scope retry_cont depth rules tpenv h [] env pre true real_unit (fun _ h _ env _ ->
+      consume_asn lemmas_in_scope (arg_pats,arg_names) retry_cont depth rules tpenv h [] env pre true real_unit (fun _ h _ env _ ->
         let (env, env0) =
           match rt with
             None -> (env, env0)
@@ -225,7 +225,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         in
         execute_branch begin fun () ->
           produce_asn tpenv h [] env post real_unit None None (fun h _ _ ->
-            consume_asn lemmas_in_scope retry_cont depth rules tpenv0 h [] env0 post0 true real_unit (fun _ h _ env0 _ ->
+            consume_asn lemmas_in_scope (arg_pats,arg_names) retry_cont depth rules tpenv0 h [] env0 post0 true real_unit (fun _ h _ env0 _ ->
               check_leaks h env0 l (msg ^ "Implementation leaks heap chunks.")
             )
           )
@@ -241,7 +241,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                   branch
                     begin fun () ->
                       if (is_subtype_of_ exceptp handler_tp) || (is_subtype_of_ handler_tp exceptp) then
-                        consume_asn lemmas_in_scope retry_cont depth rules tpenv0 h [] env0 epost0 true real_unit $. fun _ h ghostenv env size_first ->
+                        consume_asn lemmas_in_scope (arg_pats,arg_names) retry_cont depth rules tpenv0 h [] env0 epost0 true real_unit $. fun _ h ghostenv env size_first ->
                         success()
                       else
                         success()
@@ -351,7 +351,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             let cenv0 = [("this", fterm)] @ ftargenv in
             let k' = match gh with Real -> Regular | Ghost -> Lemma(true, None) in
             let xmap0 = List.map (fun (x, t) -> (x, instantiate_type fttpenv t)) xmap0 in
-            check_func_header_compat [] no_retry_cont 0 l ("Function '" ^ fn ^ "'") "Function type implementation check" env0
+            check_func_header_compat [] ([],[]) no_retry_cont 0 l ("Function '" ^ fn ^ "'") "Function type implementation check" env0
               (k, tparams, rt, xmap, nonghost_callers_only, pre, post, [], terminates)
               (k', [], rt0, xmap0, false, fttpenv, cenv0, pre0, post0, [], terminates0);
             if gh = Real then
@@ -390,7 +390,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               static_error l "Duplicate function implementation." None
           | Some (FuncInfo ([], fterm0, l0, k0, tparams0, rt0, xmap0, nonghost_callers_only0, pre0, pre_tenv0, post0, terminates0, functype_opt0, None,Static,Public)) ->
             if body = None then static_error l "Duplicate function prototype." None;
-            check_func_header_compat [] no_retry_cont 0 l ("Function '" ^ fn ^ "'") "Function prototype implementation check" [] (k, tparams, rt, xmap, nonghost_callers_only, pre, post, [], terminates) (k0, tparams0, rt0, xmap0, nonghost_callers_only0, [], [], pre0, post0, [], terminates0);
+            check_func_header_compat [] ([],[]) no_retry_cont 0 l ("Function '" ^ fn ^ "'") "Function prototype implementation check" [] (k, tparams, rt, xmap, nonghost_callers_only, pre, post, [], terminates) (k0, tparams0, rt0, xmap0, nonghost_callers_only0, [], [], pre0, post0, [], terminates0);
             iter pn ilist ((fn, FuncInfo ([], fterm, l, k, tparams, rt, xmap, nonghost_callers_only, pre, pre_tenv, post, terminates, functype_opt, body',Static,Public))::funcmap) ((fn, l0)::prototypes_implemented) ds
         end
       | _::ds -> iter pn ilist funcmap prototypes_implemented ds
@@ -482,7 +482,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               None-> static_error l1 (".java file does not correctly implement .javaspec file: interface does not declare method " ^ string_of_sign sign) None
             | Some (ItfMethodInfo (lm1,gh1,rt1,xmap1,pre1,pre_tenv1,post1,epost1,terminates1,v1,abstract1)) ->
               let (mn, _) = sign in
-              check_func_header_compat [] no_retry_cont 0 lm1 ("Method '" ^ mn ^ "'") "Method specification check" [] (func_kind_of_ghostness gh1,[],rt1, xmap1,false, pre1, post1, epost1, terminates1) (func_kind_of_ghostness gh0, [], rt0, xmap0, false, [], [], pre0, post0, epost0, terminates1);
+              check_func_header_compat [] ([],[]) no_retry_cont 0 lm1 ("Method '" ^ mn ^ "'") "Method specification check" [] (func_kind_of_ghostness gh1,[],rt1, xmap1,false, pre1, post1, epost1, terminates1) (func_kind_of_ghostness gh0, [], rt0, xmap0, false, [], [], pre0, post0, epost0, terminates1);
               match_meths meths0 (List.remove_assoc sign meths1)
         in
         match_fields fields0 fields1;
@@ -515,7 +515,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             let ("this", _)::xmap' = xmap' in
             let thisTerm = get_unique_var_symb "this" thisType in
             let (mn, _) = sign in
-            check_func_header_compat [] no_retry_cont 0 l ("Method '" ^ mn ^ "'") "Method specification check" [("this", thisTerm)]
+            check_func_header_compat [] ([],[]) no_retry_cont 0 l ("Method '" ^ mn ^ "'") "Method specification check" [("this", thisTerm)]
               (Regular, [], rt, xmap, false, pre, post, epost, terminates)
               (Regular, [], rt', xmap', false, [], [("this", thisTerm)], pre', post', epost', terminates');
             pop();
@@ -639,7 +639,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                   let ("this", _)::xmap' = xmap' in
                   let thisTerm = get_unique_var_symb "this" thisType in
                   assume (ctxt#mk_eq (ctxt#mk_app get_class_symbol [thisTerm]) (List.assoc cn classterms)) (fun _ ->
-                    check_func_header_compat [] no_retry_cont 0 l ("Method '" ^ n ^ "'") "Method specification check" [("this", thisTerm)]
+                    check_func_header_compat [] ([],[]) no_retry_cont 0 l ("Method '" ^ n ^ "'") "Method specification check" [("this", thisTerm)]
                       (Regular, [], rt, xmap, false, pre, post, epost, terminates)
                       (Regular, [], rt', xmap', false, [], [("this", thisTerm)], pre', post', epost', terminates');
                     success()
@@ -810,7 +810,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                 | Some (MethodInfo (lm1,gh1,rt1,xmap1,pre1,pre_tenv1,post1,epost1,pre_dyn1,post_dyn1,epost_dyn1,terminates1,ss1,fb1,v1,_,abstract1)) -> 
                   let epost1: (type_ * asn) list = epost1 in
                   let (mn, _) = sign0 in
-                  check_func_header_compat [] no_retry_cont 0 lm1 ("Method '" ^ mn ^ "'") "Method implementation check" []
+                  check_func_header_compat [] ([],[]) no_retry_cont 0 lm1 ("Method '" ^ mn ^ "'") "Method implementation check" []
                     (func_kind_of_ghostness gh1,[],rt1, xmap1,false, pre1, post1, epost1, terminates1)
                     (func_kind_of_ghostness gh0, [], rt0, xmap0, false, [], [], pre0, post0, epost0, terminates0);
                   if ss0=None then meths_impl:=(fst sign0,lm0)::!meths_impl;
@@ -829,7 +829,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                 | Some (CtorInfo (lm1,xmap1,pre1,pre_tenv1,post1,epost1,terminates1,ss1,v1)) ->
                   let epost1: (type_ * asn) list = epost1 in
                   let rt= None in
-                  check_func_header_compat [] no_retry_cont 0 lm1 ("Class '" ^ cn ^ "'") "Constructor implementation check" []
+                  check_func_header_compat [] ([],[]) no_retry_cont 0 lm1 ("Class '" ^ cn ^ "'") "Constructor implementation check" []
                     (Regular,[],rt, ("this", ObjType cn)::xmap1,false, pre1, post1, epost1, terminates1)
                     (Regular, [], rt, ("this", ObjType cn)::xmap0, false, [], [], pre0, post0, epost0, terminates0);
                   if ss0=None then cons_impl:=(cn,lm0)::!cons_impl;
@@ -1186,7 +1186,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
   let nonempty_pred_symbs = List.map (fun (_, (_, (_, _, _, _, symb, _, _))) -> symb) field_pred_map
   
   let eval_non_pure_cps ev is_ghost_expr ((h, env) as state) env e cont =
-    let assert_term = if is_ghost_expr then None else Some (fun l t msg url -> assert_term [] no_retry_cont 0 e t h env l msg url) in
+    let assert_term = if is_ghost_expr then None else Some (fun l t msg url -> assert_term [] ([],[]) no_retry_cont 0 e t h env l msg url) in
     let read_field =
       (fun l t f -> read_field h env l t f),
       (fun l f -> read_static_field h env l f),
@@ -1196,7 +1196,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     eval_core_cps ev state assert_term (Some read_field) env e cont
   
   let eval_non_pure is_ghost_expr h env e =
-    let assert_term = if is_ghost_expr then None else Some (fun l t msg url -> assert_term [] no_retry_cont 0 e t h env l msg url) in
+    let assert_term = if is_ghost_expr then None else Some (fun l t msg url -> assert_term [] ([],[]) no_retry_cont 0 e t h env l msg url) in
     let read_field =
       (fun l t f -> read_field h env l t f),
       (fun l f -> read_static_field h env l f),
@@ -1476,11 +1476,11 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
     in
     let ys: string list = List.map (function (p, t) -> p) ps in
     begin fun cont ->
-      let rec iter h env ts pats ps =
+      let rec iter h env ts pats ps orig_pats =
         match pats, ps with
-          [], [] -> cont h env (List.rev ts)
+          [], [] -> cont h env (List.rev ts) orig_pats
         | pats, [("varargs", _)] ->
-          let rec mk_varargs h env args pats =
+          let rec mk_varargs h env args pats orig_pats =
             match pats with
               SrcPat (LitPat e) ::pats ->
               let (w, tp) = check_expr (pn,ilist) tparams tenv (Some pure) e in
@@ -1497,22 +1497,22 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                 | PtrType _ | StaticArrayType _ -> mk_vararg_pointer t
                 | _ -> static_error (expr_loc e) ("Expressions of type '"^string_of_type tp^"' are not yet supported as arguments for a varargs function.") None
               in
-              mk_varargs h env (arg::args) pats
+              mk_varargs h env (arg::args) pats orig_pats
             | [] ->
               let varargs = mk_list (InductiveType ("vararg", [])) (List.rev args) in
-              cont h env (List.rev (varargs::ts))
+              cont h env (List.rev (varargs::ts)) orig_pats
           in
-          mk_varargs h env [] pats
+          mk_varargs h env [] pats pats
         | SrcPat (LitPat e)::pats, (x, tp0)::ps ->
           let tp = instantiate_type tpenv tp0 in
           eval_h h env (SrcPat (LitPat (box (check_expr_t (pn,ilist) tparams tenv e tp) tp tp0))) $. fun h env t ->
-          iter h env (t::ts) pats ps
+          iter h env (t::ts) pats ps orig_pats
         | TermPat t::pats, _::ps ->
-          iter h env (t::ts) pats ps
+          iter h env (t::ts) pats ps orig_pats
         | _ -> static_error l "Incorrect number of arguments." None
       in
-      iter h env [] pats ps
-    end $. fun h env ts ->
+      iter h env [] pats ps pats
+    end $. fun h env ts pats ->
     let Some env' = zip ys ts in
     let _ = if file_type path = Java && match try_assoc "this" ps with Some ObjType _ -> true | _ -> false then 
       let this_term = List.assoc "this" env' in
@@ -1541,7 +1541,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         end
       | _ -> ()
       end;
-      consume_asn_with_post funcmap retry_cont 1 rules tpenv h ghostenv cenv pre true real_unit (fun _ h ghostenv' env' chunk_size post' ->
+      consume_asn_with_post funcmap (pats,(List.map (fun (name,_) -> name) ps)) retry_cont 1 rules tpenv h ghostenv cenv pre true real_unit (fun _ h ghostenv' env' chunk_size post' ->
         let post =
           match post' with
             None -> post
@@ -1880,7 +1880,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       eval_h h env w $. fun h env n ->
       let arraySize = ctxt#mk_mul n (sizeof ls elemTp) in
       (* FIXME: retry not supported here *)
-      check_overflow lmul int_zero_term arraySize (max_signed_term int_rank) (fun l t -> assert_term [] no_retry_cont 0 e t h env l);
+      check_overflow lmul int_zero_term arraySize (max_signed_term int_rank) (fun l t -> assert_term [] ([],[]) no_retry_cont 0 e t h env l);
       let resultType = PtrType elemTp in
       let result = get_unique_var_symb (match xo with None -> "array" | Some x -> x) resultType in
       let cont h = cont h env result in
@@ -1951,7 +1951,7 @@ module VerifyExpr(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           let (lg, _, _, _, isfuncsymb) = List.assoc ("is_" ^ ftn) purefuncmap in
           let phi = mk_app isfuncsymb [fterm] in
           (* FIXME: no support for retry for is_* predicates *)
-          assert_term [] no_retry_cont 0 e phi h env l ("Could not prove is_" ^ ftn ^ "(" ^ g ^ ")") None;
+          assert_term [] ([],[]) no_retry_cont 0 e phi h env l ("Could not prove is_" ^ ftn ^ "(" ^ g ^ ")") None;
           consume_call_perm h $. fun h ->
           check_call [] h [] cont
         | Real ->

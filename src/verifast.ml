@@ -41,8 +41,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let (l, _, extended, inv, _) = List.assoc hname hpmap in
         (* FIXME: support for retry in this handle business. *)
         match extended with
-          None -> consume_asn [] no_retry_cont 0 rules [] h [] hpInvEnv inv true real_unit (fun _ h _ _ _ -> cont h)
-        | Some(ehname) -> assert_handle_invs bcn hpmap ehname hpInvEnv h (fun h ->  consume_asn [] no_retry_cont 0 rules [] h [] hpInvEnv inv true real_unit (fun _ h _ _ _ -> cont h))
+          None -> consume_asn [] ([],[]) no_retry_cont 0 rules [] h [] hpInvEnv inv true real_unit (fun _ h _ _ _ -> cont h)
+        | Some(ehname) -> assert_handle_invs bcn hpmap ehname hpInvEnv h (fun h ->  consume_asn [] ([],[]) no_retry_cont 0 rules [] h [] hpInvEnv inv true real_unit (fun _ h _ _ _ -> cont h))
 
     let rec verify_stmt (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env s tcont return_cont econt =
       let l = stmt_loc s in
@@ -289,7 +289,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                                   with_context PushSubcontext $. fun () ->
                                     let pre1_env = currentThreadEnv @ List.map (fun (x, x0, tp, t, t0, x1, tp1) -> (x1, t)) fparams @ funenv1 in
                                     (* TODO: support retry for produce_fptr_chunk calls. *)
-                                    consume_asn [] no_retry_cont 0 rules [] h [] pre1_env pre1 true real_unit $. fun _ h _ f_env _ ->
+                                    consume_asn [] ([],[]) no_retry_cont 0 rules [] h [] pre1_env pre1 true real_unit $. fun _ h _ f_env _ ->
                                       let (f_env, ft_env, tenv, ghostenv, env) =
                                         match rt1 with
                                           None -> (f_env, ft_env, tenv, ghostenv, env)
@@ -316,7 +316,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                             end $. fun h ft_env ->
                               with_context (Executing (h, ft_env, closeBraceLoc, "Consuming function type postcondition")) $. fun () ->
                                 with_context PushSubcontext $. fun () ->
-                                  consume_asn [] no_retry_cont 0 rules tpenv h [] ft_env post true real_unit $. fun _ h _ _ _ ->
+                                  consume_asn [] ([],[]) no_retry_cont 0 rules tpenv h [] ft_env post true real_unit $. fun _ h _ _ _ ->
                                     with_context PopSubcontext $. fun () ->
                                       check_leaks h [] closeBraceLoc "produce_function_pointer_chunk body leaks heap chunks"
                 end;
@@ -756,7 +756,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
       | Assert (l, p) when not pure ->
         let we = check_expr_t (pn,ilist) tparams tenv p boolt in
         let t = eval env we in
-        assert_term funcmap retry_cont 1 we t h env l ("Assertion might not hold: " ^ (ctxt#pprint t)) None;
+        assert_term funcmap ([],[]) retry_cont 1 we t h env l ("Assertion might not hold: " ^ (ctxt#pprint t)) None;
         cont h env
       | Assert (l, p) ->
         let (wp, tenv, _) = check_asn_core (pn,ilist) tparams tenv p in
@@ -816,17 +816,17 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
              *       verify_stmt (pn,ilist) blocks_done lblenv tparams boxes pure leminfo funcmap predinstmap sizemap tenv ghostenv h env s tcont return_cont econt)
              *     return_cont econt
              * end else begin *)
-              assert_term funcmap retry_cont 1 we t h env le ("Assertion might not hold: " ^ (ctxt#pprint t)) None;
+              assert_term funcmap ([],[]) retry_cont 1 we t h env le ("Assertion might not hold: " ^ (ctxt#pprint t)) None;
               cont h env
             end
           | _ ->
-            consume_asn funcmap retry_cont 1 rules [] h ghostenv env wp false real_unit (fun _ _ ghostenv env _ ->
+            consume_asn funcmap ([],[]) retry_cont 1 rules [] h ghostenv env wp false real_unit (fun _ _ ghostenv env _ ->
                 tcont sizemap tenv ghostenv h env
               )
         end
       | Leak (l, p) ->
         let (wp, tenv, _) = check_asn_core (pn,ilist) tparams tenv p in
-        consume_asn funcmap retry_cont 1 rules [] h ghostenv env wp false real_unit (fun chunks h ghostenv env size ->
+        consume_asn funcmap ([],[]) retry_cont 1 rules [] h ghostenv env wp false real_unit (fun chunks h ghostenv env size ->
             let coef = get_dummy_frac_term () in
             let chunks = List.map (fun (Chunk (g, targs, _, args, size)) -> Chunk (g, targs, coef, args, size)) chunks in
             tcont sizemap tenv ghostenv (chunks @ h) env
@@ -1022,8 +1022,8 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
             let w = check_expr_t (pn,ilist) tparams tenv e RealType in
             let coef = ev w in
             (* FIXME: support for retry in split coefficient stmts.*)
-            assert_term [] no_retry_cont 0 e (ctxt#mk_real_lt real_zero coef) h env l "Split coefficient must be positive." None;
-            assert_term [] no_retry_cont 0 e (ctxt#mk_real_lt coef real_unit) h env l "Split coefficient must be less than one." None;
+            assert_term [] ([],[]) no_retry_cont 0 e (ctxt#mk_real_lt real_zero coef) h env l "Split coefficient must be positive." None;
+            assert_term [] ([],[]) no_retry_cont 0 e (ctxt#mk_real_lt coef real_unit) h env l "Split coefficient must be less than one." None;
             coef
         in
         let (wpats, tenv') = check_pats (pn,ilist) l tparams tenv pts pats in
@@ -1283,7 +1283,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let env' = flatmap (function (p, pat, tp0, tp, Some t) -> [(p, prover_convert_term t tp tp0)] | _ -> []) ps in
         let env' = bs0 @ env' in
         with_context PushSubcontext (fun () ->
-            consume_asn funcmap retry_cont 1 rules tpenv h ghostenv env' p true coef (fun _ h p_ghostenv p_env size_first ->
+            let arg_pats = List.map (fun p -> SrcPat p) pats in
+            let arg_names = List.map (fun (name,_,_,_,_) -> name) ps in
+            consume_asn funcmap (arg_pats,arg_names) retry_cont 1 rules tpenv h ghostenv env' p true coef (fun _ h p_ghostenv p_env size_first ->
                 with_context (Executing (h, p_env, lpred, "Inferring chunk arguments")) $. fun () ->
                   let ts =
                     List.map
@@ -1380,7 +1382,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         assume_bounds lower_bound_terms upper_bounds_terms $. fun () ->
           let h = (action_permission_chunks amap) @ h in
           with_context PushSubcontext $. fun () ->
-            consume_asn funcmap retry_cont 1 rules [] h ghostenv boxArgMapWithThis inv true real_unit $. fun _ h _ boxVarMap _ ->
+            let arg_pats = List.map (fun p -> SrcPat (LitPat p)) args in
+            let arg_names = List.map (fun (name,_) -> name) boxpmap in
+            consume_asn funcmap (arg_pats,arg_names) retry_cont 1 rules [] h ghostenv boxArgMapWithThis inv true real_unit $. fun _ h _ boxVarMap _ ->
               begin fun cont ->
                 let rec iter handleChunks handleClauses h =
                   match handleClauses with
@@ -1457,7 +1461,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let xs = List.filter (fun x -> match try_assoc x tenv with None -> false | Some (RefType _) -> false | _ -> true) xs in
         let (p, tenv') = check_asn (pn,ilist) tparams tenv p in
         let dec = (match dec with None -> None | Some(e) -> Some(check_expr_t_pure tenv' e intt)) in
-        consume_asn funcmap retry_cont 1 rules [] h ghostenv env p true real_unit $. fun _ h _ _ _ ->
+        consume_asn funcmap ([],[]) retry_cont 1 rules [] h ghostenv env p true real_unit $. fun _ h _ _ _ ->
           let lblenv =
             List.map
               begin fun (lbl, cont) ->
@@ -1495,7 +1499,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                         econt
                     end $. fun h' env ->
                       let env = List.filter (fun (x, _) -> List.mem_assoc x tenv) env in
-                      consume_asn funcmap retry_cont 1 rules [] h' ghostenv env p true real_unit $. fun _ h''' _ env''' _ ->
+                      consume_asn funcmap ([],[]) retry_cont 1 rules [] h' ghostenv env p true real_unit $. fun _ h''' _ env''' _ ->
                         begin fun cont ->
                           match (t_dec, dec) with
                             (None, None) ->
@@ -1520,9 +1524,9 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                             eval_h_pure h' env''' dec $. fun _ _ t_dec2 ->
                               let dec_check1 = ctxt#mk_lt t_dec2 t_dec in
                               (* FIXME: allow retry for these checks. *)
-                              assert_term [] no_retry_cont 0 p dec_check1 h' env''' (expr_loc dec) (sprintf "Cannot prove that loop measure decreases: %s" (ctxt#pprint dec_check1)) None;
+                              assert_term [] ([],[]) no_retry_cont 0 p dec_check1 h' env''' (expr_loc dec) (sprintf "Cannot prove that loop measure decreases: %s" (ctxt#pprint dec_check1)) None;
                               let dec_check2 = ctxt#mk_le (ctxt#mk_intlit 0) t_dec in
-                              assert_term [] no_retry_cont 0 p dec_check2 h' env''' (expr_loc dec) (sprintf "Cannot prove that the loop measure remains non-negative: %s" (ctxt#pprint dec_check2)) None;
+                              assert_term [] ([],[]) no_retry_cont 0 p dec_check2 h' env''' (expr_loc dec) (sprintf "Cannot prove that the loop measure remains non-negative: %s" (ctxt#pprint dec_check2)) None;
                               cont h'''
                         end $. fun h''' ->
                           check_leaks h''' env endBodyLoc "Loop leaks heap chunks."
@@ -1551,7 +1555,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         let dec = match dec with None -> None | Some e -> Some (check_expr_t_pure tenv' e intt) in
         let ghostenv' = ghostenv in
         let env' = env in
-        consume_asn funcmap retry_cont 1 rules [] h ghostenv env pre true real_unit $. fun _ h ghostenv env _ ->
+        consume_asn funcmap ([],[]) retry_cont 1 rules [] h ghostenv env pre true real_unit $. fun _ h ghostenv env _ ->
           let bs = List.map (fun x -> (x, get_unique_var_symb_ x (List.assoc x tenv) (List.mem x ghostenv))) xs in
           let old_xs_env = List.map (fun (x, t) -> ("old_" ^ x, t)) bs in
           let env' = bs @ env' in
@@ -1566,7 +1570,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let env' = old_xs_env @ env' in
               let ghostenv' = List.map (fun (x, _) -> x) old_xs_env @ ghostenv' in
               let check_post h' env' =
-                consume_asn funcmap retry_cont 1 rules [] h' ghostenv' env' post true real_unit $. fun _ h' _ _ _ ->
+                consume_asn funcmap ([],[]) retry_cont 1 rules [] h' ghostenv' env' post true real_unit $. fun _ h' _ _ _ ->
                   check_leaks h' env' endBodyLoc "Loop leaks heap chunks"
               in
               let (ss_before, ss_after) =
@@ -1618,16 +1622,16 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                         econt
                     end $. fun h' tenv''' env' ->
                       let env'' = List.filter (fun (x, _) -> List.mem_assoc x tenv) env' in
-                      consume_asn funcmap retry_cont 1 rules [] h' ghostenv env'' pre true real_unit $. fun _ h' ghostenv'' env'' _ ->
+                      consume_asn funcmap ([],[]) retry_cont 1 rules [] h' ghostenv env'' pre true real_unit $. fun _ h' ghostenv'' env'' _ ->
                         execute_branch begin fun () -> match (t_dec, dec) with
                             (None, None) -> success()
                           | (Some t_dec, Some dec) ->
                             eval_h_pure h' env'' dec $. fun _ _ t_dec2 ->
                               let dec_check1 = ctxt#mk_lt t_dec2 t_dec in
                               (* FIXME: support retry for these checks. *)
-                              assert_term [] no_retry_cont 0 e dec_check1 h' env'' (expr_loc dec) (sprintf "Cannot prove that loop measure decreases: %s" (ctxt#pprint dec_check1)) None;
+                              assert_term [] ([],[]) no_retry_cont 0 e dec_check1 h' env'' (expr_loc dec) (sprintf "Cannot prove that loop measure decreases: %s" (ctxt#pprint dec_check1)) None;
                               let dec_check2 = ctxt#mk_le (ctxt#mk_intlit 0) t_dec in
-                              assert_term [] no_retry_cont 0 e dec_check2 h' env'' (expr_loc dec) (sprintf "Cannot prove that the loop measure remains non-negative: %s" (ctxt#pprint dec_check2)) None;
+                              assert_term [] ([],[]) no_retry_cont 0 e dec_check2 h' env'' (expr_loc dec) (sprintf "Cannot prove that the loop measure remains non-negative: %s" (ctxt#pprint dec_check2)) None;
                               success()
                         end;
                         let bs' = List.map (fun x -> (x, get_unique_var_symb_ x (List.assoc x tenv) (List.mem x ghostenv))) xs in
@@ -1881,7 +1885,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                                       (* with_context PushSubcontext $. fun () -> *)
                                       let pre_env = [("actionHandles", consumed_handles_ids)] @ pre_boxVarMap @ aargbs in
                                       (* FIXME: support retry for this check*)
-                                      assert_expr [] no_retry_cont 0 pre_env pre h pre_env closeBraceLoc "Action precondition failure." None;
+                                      assert_expr [] ([],[]) no_retry_cont 0 pre_env pre h pre_env closeBraceLoc "Action precondition failure." None;
                                       let post_boxArgMap =
                                         match post_bcp_args_opt with
                                           None -> pre_boxArgMap
@@ -1898,10 +1902,10 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                                       let boxChunk = Chunk ((boxpred_symb, true), [], box_coef, boxId::List.map (fun (x, t) -> t) post_boxArgMap, None) in
                                       let h = boxChunk :: h in
                                       (* TODO: consume_asn on the next line cannot use spatial auto lemmas that make use of boxChunk (i.e. do a perform_action) as this is box reentry *)
-                                      consume_asn [] no_retry_cont 0 rules [] h ghostenv post_boxArgMapWithThis inv true real_unit $. fun _ h _ post_boxVarMap _ ->
+                                      consume_asn [] ([],[]) no_retry_cont 0 rules [] h ghostenv post_boxArgMapWithThis inv true real_unit $. fun _ h _ post_boxVarMap _ ->
                                         let old_boxVarMap = List.map (fun (x, t) -> ("old_" ^ x, t)) pre_boxVarMap in
                                         let post_env = [("actionHandles", consumed_handles_ids)] @ old_boxVarMap @ post_boxVarMap @ aargbs in
-                                        assert_expr [] no_retry_cont 0 post_env post h post_env closeBraceLoc "Action postcondition failure." None;
+                                        assert_expr [] ([],[]) no_retry_cont 0 post_env post h post_env closeBraceLoc "Action postcondition failure." None;
                                         let reset_current_box_level h cont =
                                           if (! nonpure_ctxt) then
                                             consume_chunk rules h ghostenv env [] lcb (current_box_level_symb, true) [] real_unit dummypat None [TermPat(box_level_term)] (fun _ h box_coef ts chunk_size ghostenv env [] -> cont h)
@@ -2128,7 +2132,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
         | (true, None) -> assert_false h env (l()) "Loop invariant required." None
         | (_, Some (l, inv, tenv)) ->
           (*FIXME: support retry for the leaks checks.*)
-          consume_asn [] no_retry_cont 0 rules [] h ghostenv env inv true real_unit (fun _ h _ _ _ ->
+          consume_asn [] ([],[]) no_retry_cont 0 rules [] h ghostenv env inv true real_unit (fun _ h _ _ _ ->
               check_leaks h env l "Loop leaks heap chunks."
             )
         | (false, None) ->
@@ -2366,7 +2370,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
               let ghostenv = [] in
               let h = h_consumed @ h in
               with_context (Executing (h, param_env, l, "Auto-applying lemma")) $. fun () ->
-                consume_asn [] no_retry_cont 0 rules tpenv h ghostenv param_env pre true real_unit $. fun _ h ghostenv env size ->
+                consume_asn [] ([],[]) no_retry_cont 0 rules tpenv h ghostenv param_env pre true real_unit $. fun _ h ghostenv env size ->
                   produce_asn tpenv h ghostenv env post real_unit None None $. fun h ghostenv env -> cont (Some h)
             else 
               fail ()
@@ -2544,7 +2548,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                     let retry_cont sizemap tenv ghostenv h env =
                       do_return h env
                     in
-                    consume_asn funcmap retry_cont 1 rules [] h ghostenv env_post post true real_unit (fun _ h ghostenv env size_first ->
+                    consume_asn funcmap ([],[]) retry_cont 1 rules [] h ghostenv env_post post true real_unit (fun _ h ghostenv env size_first ->
                         cleanup_heapy_locals (pn, ilist) closeBraceLoc h env heapy_ps (fun h ->
                             check_leaks h env closeBraceLoc "Function leaks heap chunks."
                           )
@@ -2627,7 +2631,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
           branch
             begin fun () ->
               if (is_subtype_of_ exceptp handler_tp) || (is_subtype_of_ handler_tp exceptp) then
-                consume_asn [] no_retry_cont 0 rules [] h ghostenv env epost true real_unit $. fun _ h ghostenv env size_first ->
+                consume_asn [] ([],[]) no_retry_cont 0 rules [] h ghostenv env epost true real_unit $. fun _ h ghostenv env size_first ->
                   success()
               else
                 success()
@@ -2669,7 +2673,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                     end $. fun () ->
                       let do_body h ghostenv env =
                         let do_return h env_post =
-                          consume_asn [] no_retry_cont 0 rules [] h ghostenv env_post post true real_unit $. fun _ h ghostenv env size_first ->
+                          consume_asn [] ([],[]) no_retry_cont 0 rules [] h ghostenv env_post post true real_unit $. fun _ h ghostenv env size_first ->
                             check_leaks h env closeBraceLoc "Function leaks heap chunks."
                         in
                         let return_cont h tenv2 env2 retval =
@@ -2777,7 +2781,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                         let retry_cont sizemap tenv ghostenv h env =
                           do_return h env
                         in
-                        consume_asn funcmap retry_cont 1 rules [] h ghostenv env_post post true real_unit $. fun _ h ghostenv env size_first ->
+                        consume_asn funcmap ([],[]) retry_cont 1 rules [] h ghostenv env_post post true real_unit $. fun _ h ghostenv env size_first ->
                           check_leaks h env closeBraceLoc "Function leaks heap chunks."
                       in
                       let return_cont h tenv2 env2 retval =
@@ -2916,7 +2920,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                                       let hpargs = List.map (fun (x, t) -> (x, get_unique_var_symb x t)) pmap in
                                       assume_handle_invs bcn hpmap hpn ([("predicateHandle", predicateHandle)] @ pre_boxvars @ hpargs) h_pre $. fun h_pre_hinv ->
                                         (*FIXME: support this handle business.*)
-                                        consume_asn [] no_retry_cont 0 rules [] h_pre_hinv [] pre_boxargsWithThis boxinv true real_unit $. fun _ hinv _ _ _ ->                         
+                                        consume_asn [] ([],[]) no_retry_cont 0 rules [] h_pre_hinv [] pre_boxargsWithThis boxinv true real_unit $. fun _ hinv _ _ _ ->                         
                                           let old_boxvars = List.map (fun (x, t) -> ("old_" ^ x, t)) pre_boxvars in
                                           let post_boxargs = List.map (fun (x, t) -> (x, get_unique_var_symb x t)) boxpmap in
                                           let post_boxargsWithThis = ("this", boxId) :: post_boxargs in
@@ -2931,7 +2935,7 @@ module VerifyProgram(VerifyProgramArgs: VERIFY_PROGRAM_ARGS) = struct
                                                 verify_cont (pn,ilist) [] [] [] boxes true leminfo funcmap predinstmap [] tenv ghostenv h_post_hinv env ss begin fun _ _ _ h _ ->
                                                   let post_inv_env = [("predicateHandle", predicateHandle)] @ post_boxvars @ hpargs in
                                                   (* does not consume extended handles, only suffices if one can only extend pure handles *)
-                                                  consume_asn [] no_retry_cont 0 rules [] h [] post_inv_env inv true real_unit (fun _ h _ _ _ -> success ())
+                                                  consume_asn [] ([],[]) no_retry_cont 0 rules [] h [] post_inv_env inv true real_unit (fun _ h _ _ _ -> success ())
                                                 end begin fun _ _ -> static_error l "Return statements are not allowed in handle predicate preservation proofs." None end
                                                   begin fun _ _ _ _ _ -> static_error l "Exceptions are not allowed in handle predicate preservation proofs." None end
                           end

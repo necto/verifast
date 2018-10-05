@@ -5038,7 +5038,7 @@ let check_if_list_is_defined () =
     !stats#proverOtherQuery;
     (ctxt#query t)
   
-  let assert_term lemmas_in_scope retry_cont depth expr t h env l msg url = 
+  let assert_term lemmas_in_scope (arg_pats,arg_names) retry_cont depth expr t h env l msg url = 
     printf "asserting expr %s\n" (string_of_expr expr);
     printf "%d lemmas available\n" (List.length lemmas_in_scope);
     !stats#proverOtherQuery;
@@ -5067,12 +5067,6 @@ let check_if_list_is_defined () =
                            printf "%s %s, " (string_of_type type_) name;);
                        printf ")\nrequires %s\n" (string_of_expr precond);
                        printf "ensures %s\n\n" (string_of_expr postcond);
-                       printf "Insert at %s %s\n\n" (string_of_srcpos (fst l))
-                         (name ^ "(" ^ (String.concat ", " (List.map (fun (arg, _) ->
-                              match List.assoc_opt arg assignments with
-                              | Some v -> string_of_expr v
-                              | None -> arg
-                            ) params)) ^ ");");
                        Some (name,finfo,assignments)
                  end
                | Some _ -> matched_lemma) None
@@ -5081,12 +5075,40 @@ let check_if_list_is_defined () =
           match matched_lemma with
           | None -> None
           | Some (name, FuncInfo (envir, fptr, loc, func_kind, tparams, ret_type, params, nonghost_callers_only, precond, tenv_after_precond, postcond, terminates, ftype, body, mbind, visib), assignments) ->
+            let get_arg_value arg =
+              printf "argnames: %d; arg_pats: %d"
+                (List.length arg_names) (List.length arg_pats);
+              match List.fold_left2 (fun acc arg_name arg_pat ->
+                  match acc with
+                  | None -> begin match arg, arg_name, arg_pat with
+                      | (Var (_,arg),name,SrcPat (LitPat expr)) when String.equal name arg ->
+                        Some expr
+                      | (WVar (_,arg,_),name,SrcPat (LitPat expr)) when String.equal name arg ->
+                        Some expr
+                      | _ -> None
+                      end
+                  | _ -> acc)
+                None arg_names arg_pats
+              with
+              | Some expr -> expr
+              | None -> arg
+            in
             let args = List.map (fun (arg, _) ->
                 match List.assoc_opt arg assignments with
-                | Some v -> v
+                | Some v -> get_arg_value v
                 | None -> Var (l, arg)
               ) params
             in
+            printf "Insert at %s %s\n\n" (string_of_srcpos (fst l))
+              (name ^ "(" ^ (String.concat ", " (List.map (fun (arg, _) ->
+                   match List.assoc_opt arg assignments with
+                   | Some v -> string_of_expr v ^ begin match List.find_opt (fun (x, b) -> String.equal x (string_of_expr v)) env with
+                       | None -> ":"
+                       | Some (x, b) -> "=" ^ (pprint_context_term b)
+                     end
+                     ^ "=" ^ (string_of_expr (get_arg_value v))
+                   | None -> arg
+                 ) params)) ^ ");");
             Some (ExprStmt (CallExpr (l, name, [], [], (List.map (fun arg -> LitPat arg) args), Static)))
         in
         match lemma_sttmt with
